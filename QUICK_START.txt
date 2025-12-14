@@ -1,0 +1,133 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║      Steam 游戏数据采集与分析系统 - 快速参考卡片                       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+【安装依赖】
+  pip install -r requirements.txt
+
+【完整工作流】
+  1. python datacollect.py              # 采集游戏数据
+  2. python Data\preprocessing\train_ml_model.py  # 训练预测模型 (首次)
+  3. python Data\preprocessing\data_cleaner.py    # 清洗数据
+  4. python collect_reviews.py          # 收集评论 (可选)
+  5. python merge_reviews.py            # 合并评论 (可选)
+
+【快速测试】
+  python test_collector.py
+  → 选择选项 1 测试 Dota 2
+
+【数据采集】
+  python datacollect.py
+  → 选项 1: 采集 10 个示例游戏 (推荐新手)
+  → 选项 2: 自定义数量
+  → 选项 3: 指定 AppID
+  → 选项 4: 简体中文评论数 > 1000 的游戏 (⭐ 推荐)
+
+【数据清洗】
+  python Data\preprocessing\data_cleaner.py
+  → 自动检测缺失值并补全
+  → 使用 ML 模型预测在线人数
+  → 输出: Source data_cleaned.csv
+
+【评论收集】
+  python collect_reviews.py
+  → 交互式输入游戏信息
+  → 指定好评/差评数量
+  → 支持多语言过滤
+  → 输出: DATA/reviews/{游戏名}_reviews.csv
+
+【评论合并】
+  python merge_reviews.py
+  → 自动扫描 reviews 文件夹
+  → 合并所有评论数据
+  → 输出: DATA/all_reviews_merged.csv
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【核心脚本说明】
+  datacollect.py       - 游戏数据采集 (价格、类型、在线人数)
+  data_cleaner.py      - 数据清洗与补全 (智能缺失值处理)
+  train_ml_model.py    - 训练 ML 模型 (在线人数预测)
+  collect_reviews.py   - 评论数据采集 (好评/差评收集)
+  merge_reviews.py     - 评论数据合并 (批量整合)
+
+【输出格式】
+  ✓ CSV 文件  - 适合 Excel/Pandas 分析
+  ✓ JSON 文件 - 包含元数据和统计信息
+  ✓ PKL 文件  - 机器学习模型文件
+
+【机器学习模型】⭐ 新增
+  • RandomForest 模型预测在线人数
+  • 3 个独立模型: current_players, peak_24h, peak_alltime
+  • 测试集 R² > 0.85 (2/3 模型)
+  • 自动保存特征重要性分析
+
+【游戏数据字段】
+  • AppID, Name                - 基础标识
+  • Developers, Publishers     - 厂商信息
+  • Genres, Categories         - 类型标签
+  • Final_Price, Discount_%    - 价格与折扣
+  • Positive_Rate             - 好评率
+  • Owners                    - 拥有者范围
+  • Peak_Players_AllTime      - 历史最高在线
+  • Average_Playtime          - 平均游戏时长
+
+【评论数据字段】⭐ 新增
+  • 用户ID, 游戏时长(小时)     - 用户基本信息
+  • 是否推荐, 评论内容          - 评价核心数据
+  • 有用数, 搞笑数              - 互动数据
+  • 评论权重分数, 评论质量      - 质量指标
+  • 发布时间, 更新时间          - 时间戳
+  • 是否免费获得, 语言          - 附加属性
+  • Developers, Publishers     - 厂商信息
+  • Genres, Categories         - 类型标签
+  • Final_Price, Discount_%    - 价格与折扣
+  • Positive_Rate             - 好评率 ⭐ NEW
+  • Owners                    - 拥有者范围 ⭐ NEW
+  • Peak_Players_AllTime      - 历史最高在线 ⭐ NEW
+  • Historical_Low_Price      - 历史最低价 ⭐ NEW
+  • Average_Playtime          - 平均游戏时长 ⭐ NEW
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+【常见问题】
+
+Q: 采集速度太慢怎么办?
+A: 关闭 SteamCharts 和 ITAD,只用 Steam + SteamSpy
+   → 修改 datacollect.py 中相关方法调用
+
+Q: 很多数据是 None 或 N/A?
+A: 正常现象。新游戏/小众游戏第三方数据源可能没有收录
+
+Q: 如何获取更多游戏?
+【性能参考】
+  数据采集:
+  • 10 个游戏   ≈ 2-3 分钟
+  • 50 个游戏   ≈ 8-12 分钟
+  • 100 个游戏  ≈ 15-25 分钟
+  
+  数据清洗:
+  • 100 条记录  ≈ 5-10 分钟
+  • 1000 条记录 ≈ 30-60 分钟
+  • 3000+ 条    ≈ 1-2 小时 
+  
+  评论收集:
+  • 100 条评论  ≈ 30-60 秒/游戏
+  • 500 条评论  ≈ 2-3 分钟/游戏
+
+【文件说明】
+  datacollect.py           - 游戏数据采集
+  data_cleaner.py          - 数据清洗引擎
+  train_ml_model.py        - ML 模型训练
+  collect_reviews.py       - 评论数据采集
+  merge_reviews.py         - 评论数据合并
+  test_collector.py        - 测试工具
+  README.md               - 完整文档
+  QUICK_START.txt         - 本文件
+【文件说明】
+  datacollect.py       - 主采集脚本
+  test_collector.py    - 测试工具
+  analyze_data.py      - 数据分析工具
+  config_example.py    - 配置示例
+  README.md           - 详细文档
+  PROJECT_GUIDE.md    - 快速上手
