@@ -1,0 +1,209 @@
+<div class="data-cleaning-container">
+  <div class="page-header">
+    <h1>智能数据清洗</h1>
+    <p class="subtitle">自动检测缺失值,结合 Steam API 和机器学习模型进行智能补全,生成高质量清洗数据</p>
+  </div>
+
+  <!-- 文件配置 -->
+  <div class="file-config">
+    <h2>数据文件</h2>
+    <div class="config-form">
+      <div class="form-group">
+        <label for="inputFile">输入文件</label>
+        <input type="text" 
+               id="inputFile" 
+               [(ngModel)]="config.inputFile" 
+               placeholder="Source data.csv">
+        <small>需要清洗的原始数据文件</small>
+      </div>
+
+      <div class="form-group">
+        <label for="outputFile">输出文件</label>
+        <input type="text" 
+               id="outputFile" 
+               [(ngModel)]="config.outputFile" 
+               placeholder="Source data_cleaned.csv">
+        <small>清洗后的数据文件名</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- 清洗选项 -->
+  <div class="cleaning-options">
+    <h2>清洗配置</h2>
+    <div class="options-grid">
+      <label class="option-card">
+        <input type="checkbox" [(ngModel)]="config.useApiCompletion">
+        <div class="option-content">
+          <h4>🌐 API 数据补全</h4>
+          <p>使用 Steam API 获取缺失数据</p>
+        </div>
+      </label>
+
+      <label class="option-card">
+        <input type="checkbox" [(ngModel)]="config.useMlPrediction">
+        <div class="option-content">
+          <h4>🤖 ML 模型预测</h4>
+          <p>当 API 不可用时使用模型预测</p>
+        </div>
+      </label>
+
+      <label class="option-card">
+        <input type="checkbox" [(ngModel)]="config.removeInvalid">
+        <div class="option-content">
+          <h4>❌ 删除无效记录</h4>
+          <p>删除无法修复的异常数据</p>
+        </div>
+      </label>
+
+      <label class="option-card">
+        <input type="checkbox" [(ngModel)]="config.generateReport">
+        <div class="option-content">
+          <h4>📄 生成报告</h4>
+          <p>输出详细的清洗报告</p>
+        </div>
+      </label>
+    </div>
+  </div>
+
+  <!-- 操作按钮 -->
+  <div class="action-buttons">
+    <button class="btn btn-primary" 
+            (click)="startCleaning()" 
+            [disabled]="isCleaning">
+      @if (isCleaning) {
+        <span class="spinner"></span>
+        清洗中...
+      } @else {
+        <span>🚀</span>
+        开始清洗
+      }
+    </button>
+    
+    <button class="btn btn-secondary" 
+            (click)="stopCleaning()" 
+            [disabled]="!isCleaning">
+      <span>⏹️</span>
+      停止
+    </button>
+
+    <button class="btn btn-outline" 
+            (click)="resetConfig()" 
+            [disabled]="isCleaning">
+      <span>🔄</span>
+      重置
+    </button>
+  </div>
+
+  <!-- 清洗进度 -->
+  <div class="cleaning-progress" *ngIf="isCleaning || cleaningComplete">
+    <h2>清洗进度</h2>
+    
+    <div class="progress-stats">
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.processed }}</div>
+        <div class="stat-label">已处理</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.total }}</div>
+        <div class="stat-label">总记录数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.fixed }}</div>
+        <div class="stat-label">已修复</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.removed }}</div>
+        <div class="stat-label">已删除</div>
+      </div>
+    </div>
+
+    <div class="progress-bar-container">
+      <div class="progress-bar" [style.width.%]="progress.percentage"></div>
+    </div>
+
+    <div class="current-status" *ngIf="progress.status">
+      <span class="label">状态:</span>
+      <span class="status">{{ progress.status }}</span>
+    </div>
+  </div>
+
+  <!-- 清洗日志 -->
+  <div class="cleaning-logs" *ngIf="logs.length > 0">
+    <h2>清洗日志</h2>
+    <div class="log-container">
+      @for (log of logs; track log.timestamp) {
+        <div class="log-entry" [class]="log.type">
+          <span class="timestamp">{{ log.timestamp | date:'HH:mm:ss' }}</span>
+          <span class="message">{{ log.message }}</span>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- 清洗结果 -->
+  <div class="cleaning-results" *ngIf="cleaningComplete">
+    <h2>清洗结果</h2>
+    
+    <div class="result-summary">
+      <div class="summary-card">
+        <h3>📊 数据统计</h3>
+        <p>原始记录: {{ progress.total }}</p>
+        <p>修复记录: {{ progress.fixed }}</p>
+        <p>删除记录: {{ progress.removed }}</p>
+        <p>最终记录: {{ progress.total - progress.removed }}</p>
+      </div>
+
+      <div class="summary-card">
+        <h3>🔧 修复方法</h3>
+        <p>API 补全: {{ stats.apiFixed }}</p>
+        <p>ML 预测: {{ stats.mlFixed }}</p>
+        <p>简单填充: {{ stats.simpleFilled }}</p>
+      </div>
+
+      <div class="summary-card">
+        <h3>⏱️ 耗时信息</h3>
+        <p>总耗时: {{ stats.totalTime }}</p>
+        <p>平均速度: {{ stats.avgSpeed }} 记录/秒</p>
+      </div>
+    </div>
+
+    <div class="result-actions">
+      <button class="btn btn-success" (click)="downloadCleaned()">
+        <span>📥</span>
+        下载清洗数据
+      </button>
+      <button class="btn btn-primary" (click)="viewReport()">
+        <span>📄</span>
+        查看详细报告
+      </button>
+    </div>
+  </div>
+
+  <!-- 清洗说明 -->
+  <div class="cleaning-info">
+    <h2>清洗流程</h2>
+    <div class="info-steps">
+      <div class="step-card">
+        <div class="step-number">1</div>
+        <h4>检测缺失值</h4>
+        <p>扫描关键字段,识别缺失或异常数据</p>
+      </div>
+      <div class="step-card">
+        <div class="step-number">2</div>
+        <h4>API 数据补全</h4>
+        <p>使用 Steam API 和 SteamSpy 获取缺失数据</p>
+      </div>
+      <div class="step-card">
+        <div class="step-number">3</div>
+        <h4>ML 模型预测</h4>
+        <p>当 API 失败时,使用训练好的模型预测</p>
+      </div>
+      <div class="step-card">
+        <div class="step-number">4</div>
+        <h4>生成报告</h4>
+        <p>输出清洗结果和详细统计信息</p>
+      </div>
+    </div>
+  </div>
+</div>

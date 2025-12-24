@@ -1,0 +1,233 @@
+<div class="review-collection-container">
+  <div class="page-header">
+    <h1>评论数据采集</h1>
+    <p class="subtitle">收集指定游戏的用户评论数据,包括好评、差评、评论内容、用户信息等,用于情感分析和用户洞察</p>
+  </div>
+
+  <!-- 游戏信息配置 -->
+  <div class="game-config">
+    <h2>游戏信息</h2>
+    <div class="config-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="appId">Steam AppID *</label>
+          <input type="number" 
+                 id="appId" 
+                 [(ngModel)]="config.appId" 
+                 placeholder="例如: 570 (Dota 2)">
+          <small>游戏的 Steam AppID,可在游戏商店页面 URL 中找到</small>
+        </div>
+
+        <div class="form-group">
+          <label for="gameName">游戏名称 *</label>
+          <input type="text" 
+                 id="gameName" 
+                 [(ngModel)]="config.gameName" 
+                 placeholder="例如: Dota 2">
+          <small>游戏的中文或英文名称,用于文件命名</small>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="positiveCount">好评数量</label>
+          <input type="number" 
+                 id="positiveCount" 
+                 [(ngModel)]="config.positiveCount" 
+                 min="0" 
+                 placeholder="默认: 100">
+          <small>需要收集的好评数量</small>
+        </div>
+
+        <div class="form-group">
+          <label for="negativeCount">差评数量</label>
+          <input type="number" 
+                 id="negativeCount" 
+                 [(ngModel)]="config.negativeCount" 
+                 min="0" 
+                 placeholder="默认: 100">
+          <small>需要收集的差评数量</small>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>语言过滤</label>
+        <div class="language-options">
+          <label class="radio-option">
+            <input type="radio" 
+                   name="language" 
+                   value="all" 
+                   [(ngModel)]="config.language">
+            所有语言
+          </label>
+          <label class="radio-option">
+            <input type="radio" 
+                   name="language" 
+                   value="schinese" 
+                   [(ngModel)]="config.language">
+            简体中文
+          </label>
+          <label class="radio-option">
+            <input type="radio" 
+                   name="language" 
+                   value="english" 
+                   [(ngModel)]="config.language">
+            英语
+          </label>
+          <label class="radio-option">
+            <input type="radio" 
+                   name="language" 
+                   value="tchinese" 
+                   [(ngModel)]="config.language">
+            繁体中文
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 操作按钮 -->
+  <div class="action-buttons">
+    <button class="btn btn-primary" 
+            (click)="startCollection()" 
+            [disabled]="isCollecting || !isConfigValid()">
+      @if (isCollecting) {
+        <span class="spinner"></span>
+        采集中...
+      } @else {
+        <span>🚀</span>
+        开始采集
+      }
+    </button>
+    
+    <button class="btn btn-secondary" 
+            (click)="stopCollection()" 
+            [disabled]="!isCollecting">
+      <span>⏹️</span>
+      停止采集
+    </button>
+
+    <button class="btn btn-outline" 
+            (click)="resetForm()" 
+            [disabled]="isCollecting">
+      <span>🔄</span>
+      重置
+    </button>
+  </div>
+
+  <!-- 采集进度 -->
+  <div class="collection-progress" *ngIf="isCollecting || collectionComplete">
+    <h2>采集进度</h2>
+    
+    <div class="progress-stats">
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.collected }}</div>
+        <div class="stat-label">已采集</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.target }}</div>
+        <div class="stat-label">目标数量</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.positive }}</div>
+        <div class="stat-label">好评</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.negative }}</div>
+        <div class="stat-label">差评</div>
+      </div>
+    </div>
+
+    <div class="progress-bar-container">
+      <div class="progress-bar" [style.width.%]="progress.percentage"></div>
+    </div>
+
+    <div class="current-status" *ngIf="progress.currentStatus">
+      <span class="label">状态:</span>
+      <span class="status">{{ progress.currentStatus }}</span>
+    </div>
+  </div>
+
+  <!-- 采集日志 -->
+  <div class="collection-logs" *ngIf="logs.length > 0">
+    <h2>采集日志</h2>
+    <div class="log-container">
+      @for (log of logs; track log.timestamp) {
+        <div class="log-entry" [class]="log.type">
+          <span class="timestamp">{{ log.timestamp | date:'HH:mm:ss' }}</span>
+          <span class="message">{{ log.message }}</span>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- 采集结果 -->
+  <div class="collection-result" *ngIf="collectionComplete">
+    <h2>采集完成</h2>
+    <div class="result-summary">
+      <div class="summary-card">
+        <h3>📊 数据统计</h3>
+        <p>总评论数: {{ progress.collected }}</p>
+        <p>好评数: {{ progress.positive }}</p>
+        <p>差评数: {{ progress.negative }}</p>
+        <p>好评率: {{ calculatePositiveRate() }}%</p>
+      </div>
+      <div class="summary-card">
+        <h3>⏱️ 采集信息</h3>
+        <p>游戏: {{ config.gameName }}</p>
+        <p>AppID: {{ config.appId }}</p>
+        <p>语言: {{ getLanguageName() }}</p>
+      </div>
+    </div>
+
+    <div class="result-actions">
+      <button class="btn btn-success" (click)="downloadCSV()">
+        <span>📥</span>
+        下载 CSV
+      </button>
+      <button class="btn btn-primary" (click)="viewSample()">
+        <span>👁️</span>
+        查看样本
+      </button>
+    </div>
+  </div>
+
+  <!-- 评论字段说明 -->
+  <div class="data-fields">
+    <h2>评论数据字段</h2>
+    <div class="fields-grid">
+      <div class="field-card">
+        <h4>用户信息</h4>
+        <ul>
+          <li>用户ID</li>
+          <li>游戏时长</li>
+          <li>拥有游戏数</li>
+        </ul>
+      </div>
+      <div class="field-card">
+        <h4>评论内容</h4>
+        <ul>
+          <li>评论文本</li>
+          <li>是否推荐</li>
+          <li>发布时间</li>
+        </ul>
+      </div>
+      <div class="field-card">
+        <h4>互动数据</h4>
+        <ul>
+          <li>有用数</li>
+          <li>搞笑数</li>
+          <li>评论质量</li>
+        </ul>
+      </div>
+      <div class="field-card">
+        <h4>其他属性</h4>
+        <ul>
+          <li>是否免费获得</li>
+          <li>评论权重分数</li>
+          <li>语言</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>

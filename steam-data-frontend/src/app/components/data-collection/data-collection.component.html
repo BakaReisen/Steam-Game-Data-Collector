@@ -1,0 +1,293 @@
+<div class="data-collection-container">
+  <div class="page-header">
+    <h1>游戏数据采集</h1>
+    <p class="subtitle">从 Steam 平台采集游戏的详细数据,包括价格、类型、评分、在线人数等商务分析数据</p>
+  </div>
+
+  <!-- 采集模式选择 -->
+  <div class="collection-modes">
+    <h2>选择采集模式</h2>
+    <div class="mode-cards">
+      <div class="mode-card" 
+           [class.active]="selectedMode === 1" 
+           (click)="selectMode(1)">
+        <div class="mode-icon">🎮</div>
+        <h3>示例游戏</h3>
+        <p>采集 10 个热门游戏</p>
+        <span class="badge">推荐新手</span>
+      </div>
+
+      <div class="mode-card" 
+           [class.active]="selectedMode === 2" 
+           (click)="selectMode(2)">
+        <div class="mode-icon">🔢</div>
+        <h3>自定义数量</h3>
+        <p>指定采集游戏数量</p>
+        <span class="badge">灵活配置</span>
+      </div>
+
+      <div class="mode-card" 
+           [class.active]="selectedMode === 3" 
+           (click)="selectMode(3)">
+        <div class="mode-icon">🎯</div>
+        <h3>指定 AppID</h3>
+        <p>采集特定游戏列表</p>
+        <span class="badge">精准采集</span>
+      </div>
+
+      <div class="mode-card" 
+           [class.active]="selectedMode === 4" 
+           (click)="selectMode(4)">
+        <div class="mode-icon">🌟</div>
+        <h3>热门游戏</h3>
+        <p>简体中文评论数 > 1000</p>
+        <span class="badge recommended">⭐ 推荐</span>
+      </div>
+
+      <div class="mode-card" 
+           [class.active]="selectedMode === 5" 
+           (click)="selectMode(5)">
+        <div class="mode-icon">🚀</div>
+        <h3>大规模采集</h3>
+        <p>SteamSpy Top 1000-10000</p>
+        <span class="badge">高级</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 配置参数 -->
+  <div class="collection-config" *ngIf="selectedMode">
+    <h2>配置参数</h2>
+    <div class="config-form">
+      @switch (selectedMode) {
+        @case (2) {
+          <div class="form-group">
+            <label for="gameCount">游戏数量</label>
+            <input type="number" 
+                   id="gameCount" 
+                   [(ngModel)]="config.gameCount" 
+                   min="1" 
+                   max="10000"
+                   placeholder="输入要采集的游戏数量">
+            <small>建议: 10-100 (测试), 100-500 (中等规模), 1000+ (大规模)</small>
+          </div>
+        }
+        @case (3) {
+          <div class="form-group">
+            <label for="appIds">AppID 列表</label>
+            <textarea id="appIds" 
+                      [(ngModel)]="config.appIdsText" 
+                      rows="4"
+                      placeholder="输入 AppID,用逗号或换行分隔&#10;例如: 570, 730, 440"></textarea>
+            <small>每行一个 AppID 或用逗号分隔,例如: 570 (Dota 2), 730 (CS:GO)</small>
+          </div>
+        }
+        @case (4) {
+          <div class="form-group">
+            <label for="minReviews">最小评论数</label>
+            <input type="number" 
+                   id="minReviews" 
+                   [(ngModel)]="config.minReviews" 
+                   min="100"
+                   placeholder="默认: 1000">
+            <small>筛选简体中文评论数量大于此值的游戏</small>
+          </div>
+          <div class="form-group">
+            <label for="maxGames">最大游戏数</label>
+            <input type="number" 
+                   id="maxGames" 
+                   [(ngModel)]="config.maxGames" 
+                   min="1"
+                   placeholder="不限制(留空)">
+            <small>限制采集的游戏数量,留空则不限制</small>
+          </div>
+        }
+        @case (5) {
+          <div class="form-group">
+            <label for="topLimit">Top 排名数量</label>
+            <input type="number" 
+                   id="topLimit" 
+                   [(ngModel)]="config.topLimit" 
+                   min="100" 
+                   max="10000"
+                   placeholder="默认: 1000">
+            <small>从 SteamSpy 获取 Top N 游戏 (100-10000)</small>
+          </div>
+        }
+      }
+
+      <!-- 通用配置 -->
+      <div class="form-group">
+        <label for="delay">请求延迟 (秒)</label>
+        <input type="number" 
+               id="delay" 
+               [(ngModel)]="config.delay" 
+               min="0.5" 
+               max="10" 
+               step="0.5"
+               placeholder="默认: 1.5">
+        <small>每个游戏之间的延迟时间,避免触发 API 限流 (建议 1.5-3 秒)</small>
+      </div>
+
+      <div class="form-group">
+        <label for="saveInterval">保存间隔</label>
+        <input type="number" 
+               id="saveInterval" 
+               [(ngModel)]="config.saveInterval" 
+               min="10" 
+               max="1000"
+               placeholder="默认: 100">
+        <small>每采集 N 个游戏保存一次检查点文件</small>
+      </div>
+
+      <div class="form-group checkbox-group">
+        <label>
+          <input type="checkbox" [(ngModel)]="config.skipSteamCharts">
+          跳过 SteamCharts 数据 (加快速度)
+        </label>
+        <small>不采集历史在线人数数据,可显著提升采集速度</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- 操作按钮 -->
+  <div class="action-buttons" *ngIf="selectedMode">
+    <button class="btn btn-primary" 
+            (click)="startCollection()" 
+            [disabled]="isCollecting">
+      @if (isCollecting) {
+        <span class="spinner"></span>
+        采集中...
+      } @else {
+        <span>🚀</span>
+        开始采集
+      }
+    </button>
+    
+    <button class="btn btn-secondary" 
+            (click)="stopCollection()" 
+            [disabled]="!isCollecting">
+      <span>⏹️</span>
+      停止采集
+    </button>
+
+    <button class="btn btn-outline" 
+            (click)="resetForm()" 
+            [disabled]="isCollecting">
+      <span>🔄</span>
+      重置配置
+    </button>
+  </div>
+
+  <!-- 采集进度 -->
+  <div class="collection-progress" *ngIf="isCollecting || collectionComplete">
+    <h2>采集进度</h2>
+    
+    <div class="progress-stats">
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.current }}</div>
+        <div class="stat-label">已采集</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.total }}</div>
+        <div class="stat-label">总数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.success }}</div>
+        <div class="stat-label">成功</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.failed }}</div>
+        <div class="stat-label">失败</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.percentage }}%</div>
+        <div class="stat-label">完成度</div>
+      </div>
+    </div>
+
+    <div class="progress-bar-container">
+      <div class="progress-bar" [style.width.%]="progress.percentage"></div>
+    </div>
+
+    <div class="current-game" *ngIf="progress.currentGame">
+      <span class="label">正在采集:</span>
+      <span class="game-name">{{ progress.currentGame }}</span>
+    </div>
+
+    <div class="eta" *ngIf="progress.estimatedTime">
+      <span class="label">预计剩余时间:</span>
+      <span class="time">{{ progress.estimatedTime }}</span>
+    </div>
+  </div>
+
+  <!-- 采集日志 -->
+  <div class="collection-logs" *ngIf="logs.length > 0">
+    <h2>采集日志</h2>
+    <div class="log-container">
+      @for (log of logs; track log.timestamp) {
+        <div class="log-entry" [class]="log.type">
+          <span class="timestamp">{{ log.timestamp | date:'HH:mm:ss' }}</span>
+          <span class="message">{{ log.message }}</span>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- 采集结果 -->
+  <div class="collection-result" *ngIf="collectionComplete">
+    <h2>采集完成</h2>
+    <div class="result-summary">
+      <div class="summary-card success">
+        <h3>✅ 采集成功</h3>
+        <p class="count">{{ progress.success }} 个游戏</p>
+      </div>
+      <div class="summary-card failed" *ngIf="progress.failed > 0">
+        <h3>❌ 采集失败</h3>
+        <p class="count">{{ progress.failed }} 个游戏</p>
+      </div>
+      <div class="summary-card time">
+        <h3>⏱️ 总耗时</h3>
+        <p class="count">{{ progress.totalTime }}</p>
+      </div>
+    </div>
+
+    <div class="result-actions">
+      <button class="btn btn-success" (click)="downloadCSV()">
+        <span>📥</span>
+        下载 CSV 文件
+      </button>
+      <button class="btn btn-success" (click)="downloadJSON()">
+        <span>📥</span>
+        下载 JSON 文件
+      </button>
+      <button class="btn btn-primary" (click)="viewData()">
+        <span>👁️</span>
+        查看数据
+      </button>
+    </div>
+  </div>
+
+  <!-- 数据源说明 -->
+  <div class="data-sources">
+    <h2>数据源说明</h2>
+    <div class="source-cards">
+      <div class="source-card">
+        <h3>Steam Official API</h3>
+        <p>基础游戏信息、价格、平台支持</p>
+      </div>
+      <div class="source-card">
+        <h3>SteamSpy API</h3>
+        <p>销量估算、玩家数据、评分统计</p>
+      </div>
+      <div class="source-card">
+        <h3>SteamCharts</h3>
+        <p>历史在线人数、峰值数据 (可选)</p>
+      </div>
+      <div class="source-card">
+        <h3>IsThereAnyDeal</h3>
+        <p>历史最低价格 (可选)</p>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,253 @@
+<div class="model-training-container">
+  <div class="page-header">
+    <h1>机器学习模型训练</h1>
+    <p class="subtitle">基于游戏数据训练 RandomForest 模型,预测游戏在线人数相关指标,支持缺失数据智能补全</p>
+  </div>
+
+  <!-- 数据集配置 -->
+  <div class="dataset-config">
+    <h2>数据集配置</h2>
+    <div class="config-form">
+      <div class="form-group">
+        <label for="dataFile">数据文件</label>
+        <input type="text" 
+               id="dataFile" 
+               [(ngModel)]="config.dataFile" 
+               placeholder="Source data.csv">
+        <small>训练数据文件路径 (默认使用 Source data.csv)</small>
+      </div>
+
+      <div class="form-group">
+        <label>选择训练模型</label>
+        <div class="model-options">
+          <label class="checkbox-option">
+            <input type="checkbox" 
+                   [(ngModel)]="config.trainCurrentPlayers">
+            当前在线人数 (current_players)
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" 
+                   [(ngModel)]="config.trainPeak24h">
+            24小时峰值 (peak_24h)
+          </label>
+          <label class="checkbox-option">
+            <input type="checkbox" 
+                   [(ngModel)]="config.trainPeakAllTime">
+            历史最高在线 (peak_alltime)
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模型参数 -->
+  <div class="model-params">
+    <h2>模型参数</h2>
+    <div class="params-grid">
+      <div class="param-group">
+        <label for="testSize">测试集比例</label>
+        <input type="number" 
+               id="testSize" 
+               [(ngModel)]="config.testSize" 
+               min="0.1" 
+               max="0.5" 
+               step="0.05">
+        <small>0.2 = 20% 数据用于测试</small>
+      </div>
+
+      <div class="param-group">
+        <label for="nEstimators">决策树数量</label>
+        <input type="number" 
+               id="nEstimators" 
+               [(ngModel)]="config.nEstimators" 
+               min="10" 
+               max="500">
+        <small>RandomForest 中的树数量</small>
+      </div>
+
+      <div class="param-group">
+        <label for="maxDepth">最大深度</label>
+        <input type="number" 
+               id="maxDepth" 
+               [(ngModel)]="config.maxDepth" 
+               min="5" 
+               max="50">
+        <small>每棵树的最大深度</small>
+      </div>
+
+      <div class="param-group">
+        <label for="randomState">随机种子</label>
+        <input type="number" 
+               id="randomState" 
+               [(ngModel)]="config.randomState">
+        <small>保证结果可复现</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- 操作按钮 -->
+  <div class="action-buttons">
+    <button class="btn btn-primary" 
+            (click)="startTraining()" 
+            [disabled]="isTraining || !hasSelectedModel()">
+      @if (isTraining) {
+        <span class="spinner"></span>
+        训练中...
+      } @else {
+        <span>🚀</span>
+        开始训练
+      }
+    </button>
+    
+    <button class="btn btn-secondary" 
+            (click)="stopTraining()" 
+            [disabled]="!isTraining">
+      <span>⏹️</span>
+      停止训练
+    </button>
+
+    <button class="btn btn-outline" 
+            (click)="resetConfig()" 
+            [disabled]="isTraining">
+      <span>🔄</span>
+      重置参数
+    </button>
+  </div>
+
+  <!-- 训练进度 -->
+  <div class="training-progress" *ngIf="isTraining || trainingComplete">
+    <h2>训练进度</h2>
+    
+    <div class="progress-stats">
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.currentModel }}</div>
+        <div class="stat-label">当前模型</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.completed }}/{{ progress.total }}</div>
+        <div class="stat-label">已完成</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ progress.percentage }}%</div>
+        <div class="stat-label">进度</div>
+      </div>
+    </div>
+
+    <div class="progress-bar-container">
+      <div class="progress-bar" [style.width.%]="progress.percentage"></div>
+    </div>
+
+    <div class="current-status" *ngIf="progress.status">
+      <span class="label">状态:</span>
+      <span class="status">{{ progress.status }}</span>
+    </div>
+  </div>
+
+  <!-- 训练日志 -->
+  <div class="training-logs" *ngIf="logs.length > 0">
+    <h2>训练日志</h2>
+    <div class="log-container">
+      @for (log of logs; track log.timestamp) {
+        <div class="log-entry" [class]="log.type">
+          <span class="timestamp">{{ log.timestamp | date:'HH:mm:ss' }}</span>
+          <span class="message">{{ log.message }}</span>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- 训练结果 -->
+  <div class="training-results" *ngIf="trainingComplete">
+    <h2>训练结果</h2>
+    
+    @for (result of results; track result.modelName) {
+      <div class="result-card">
+        <h3>{{ result.modelName }}</h3>
+        <div class="metrics-grid">
+          <div class="metric">
+            <span class="label">MAE (平均绝对误差)</span>
+            <span class="value">{{ result.mae | number:'1.0-0' }}</span>
+          </div>
+          <div class="metric">
+            <span class="label">RMSE (均方根误差)</span>
+            <span class="value">{{ result.rmse | number:'1.0-0' }}</span>
+          </div>
+          <div class="metric">
+            <span class="label">R² 分数</span>
+            <span class="value" [class.good]="result.r2 > 0.8">{{ result.r2 | number:'1.2-4' }}</span>
+          </div>
+          <div class="metric">
+            <span class="label">训练样本数</span>
+            <span class="value">{{ result.trainSamples }}</span>
+          </div>
+        </div>
+        
+        <div class="feature-importance" *ngIf="result.featureImportance.length > 0">
+          <h4>特征重要性 Top 5</h4>
+          <div class="importance-bars">
+            @for (feature of result.featureImportance.slice(0, 5); track feature.name) {
+              <div class="importance-item">
+                <span class="feature-name">{{ feature.name }}</span>
+                <div class="importance-bar-container">
+                  <div class="importance-bar" [style.width.%]="feature.importance * 100"></div>
+                </div>
+                <span class="importance-value">{{ feature.importance | percent:'1.1-1' }}</span>
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+    }
+
+    <div class="result-actions">
+      <button class="btn btn-success" (click)="downloadModels()">
+        <span>📥</span>
+        下载模型文件
+      </button>
+      <button class="btn btn-primary" (click)="viewReport()">
+        <span>📄</span>
+        查看详细报告
+      </button>
+    </div>
+  </div>
+
+  <!-- 模型说明 -->
+  <div class="model-info">
+    <h2>模型说明</h2>
+    <div class="info-grid">
+      <div class="info-card">
+        <h4>🎯 预测目标</h4>
+        <ul>
+          <li><strong>当前在线人数</strong>: 实时在线玩家数</li>
+          <li><strong>24小时峰值</strong>: 近24小时最高在线</li>
+          <li><strong>历史最高</strong>: 有史以来最高在线</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>📊 特征包括</h4>
+        <ul>
+          <li>游戏年龄、价格</li>
+          <li>平均/中位数游戏时长</li>
+          <li>游戏时长价格比</li>
+          <li>活跃度指标</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>⚙️ 模型算法</h4>
+        <ul>
+          <li><strong>RandomForest</strong>: 集成学习</li>
+          <li>高准确度、防过拟合</li>
+          <li>自动特征重要性分析</li>
+        </ul>
+      </div>
+      <div class="info-card">
+        <h4>🛠️ 应用场景</h4>
+        <ul>
+          <li>缺失数据智能补全</li>
+          <li>游戏成功预测</li>
+          <li>市场趋势分析</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
