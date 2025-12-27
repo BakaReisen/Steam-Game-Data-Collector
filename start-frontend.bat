@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 REM Steam 游戏数据采集器 - 前端快速启动脚本 (CMD 版本)
 REM 用途: 一键启动 Angular 前端开发服务器
 
@@ -55,4 +56,4 @@ echo.
 echo =====================================
 echo.
 
-npm start
+call npm start
