@@ -1,169 +1,243 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+
+// API 基础地址
+const API_BASE_URL = 'http://localhost:5000/api';
 
 export interface CollectionRequest {
-  mode: number;
-  config: {
-    gameCount?: number;
-    appIds?: number[];
-    minReviews?: number;
-    maxGames?: number;
-    topLimit?: number;
-    delay?: number;
-    saveInterval?: number;
-    skipSteamCharts?: boolean;
-  };
+  mode: string;  // 'sample' | 'custom' | 'chinese_reviews' | 'steamspy' | 'top_games'
+  delay?: number;
+  skipSteamcharts?: boolean;
+  appIds?: number[];
+  threshold?: number;
+  maxGames?: number;
+  limit?: number;
 }
 
-export interface CollectionResponse {
-  success: boolean;
+export interface TaskResponse {
+  task_id: string;
   message: string;
-  taskId?: string;
-  data?: any;
 }
 
-export interface CollectionStatus {
-  taskId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  progress: {
-    current: number;
-    total: number;
-    success: number;
-    failed: number;
-    percentage: number;
-    currentGame?: string;
-    estimatedTime?: string;
-  };
+export interface TaskStatus {
+  id: string;
+  type: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  progress: number;
+  message: string;
   logs: Array<{
     timestamp: string;
     message: string;
-    type: 'info' | 'success' | 'error' | 'warning';
+    level: 'info' | 'success' | 'error' | 'warning';
   }>;
+  result?: any;
+  error?: string;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface GameData {
-  AppID: number;
-  Name: string;
-  Type: string;
-  Release_Date: string;
-  Developers: string;
-  Publishers: string;
-  Genres: string;
-  Categories: string;
-  Tags: string;
-  Is_Free: boolean;
-  Final_Price: number;
-  Discount_Percent: number;
-  Positive_Rate: number;
-  Total_Reviews: number;
-  Owners: string;
-  Current_Players: number;
-  Peak_Players_AllTime: number;
-  [key: string]: any;
+export interface ReviewRequest {
+  gameName?: string;
+  appId: number;
+  maxReviews?: number;
+  language?: string;
+  reviewType?: string;
+}
+
+export interface TrainingRequest {
+  inputFile: string;
+  testSize?: number;
+  randomState?: number;
+  nEstimators?: number;
+}
+
+export interface CleaningRequest {
+  inputFile: string;
+  useApi?: boolean;
+  useMl?: boolean;
+  useEstimation?: boolean;
+  deleteFailed?: boolean;
 }
 
 @Injectable({
   providedIn: 'root'
 })
 export class SteamApiService {
-  private apiUrl = 'http://localhost:5000/api'; // 后端 API 地址
-
   constructor(private http: HttpClient) { }
+
+  // ==================== 游戏数据采集 ====================
 
   /**
    * 开始游戏数据采集任务
    */
-  startCollection(request: CollectionRequest): Observable<CollectionResponse> {
-    return this.http.post<CollectionResponse>(`${this.apiUrl}/collect/start`, request);
+  startCollection(request: CollectionRequest): Observable<TaskResponse> {
+    return this.http.post<TaskResponse>(`${API_BASE_URL}/collect/start`, request);
   }
 
   /**
    * 获取采集任务状态
    */
-  getCollectionStatus(taskId: string): Observable<CollectionStatus> {
-    return this.http.get<CollectionStatus>(`${this.apiUrl}/collect/status/${taskId}`);
+  getCollectionStatus(taskId: string): Observable<TaskStatus> {
+    return this.http.get<TaskStatus>(`${API_BASE_URL}/collect/status/${taskId}`);
   }
 
   /**
-   * 停止采集任务
+   * 取消采集任务
    */
-  stopCollection(taskId: string): Observable<CollectionResponse> {
-    return this.http.post<CollectionResponse>(`${this.apiUrl}/collect/stop/${taskId}`, {});
+  cancelCollection(taskId: string): Observable<any> {
+    return this.http.delete(`${API_BASE_URL}/tasks/${taskId}`);
   }
 
   /**
-   * 获取采集结果数据
+   * 下载采集结果
    */
-  getCollectionResult(taskId: string): Observable<GameData[]> {
-    return this.http.get<GameData[]>(`${this.apiUrl}/collect/result/${taskId}`);
+  downloadCollectionResult(taskId: string): string {
+    return `${API_BASE_URL}/collect/download/${taskId}`;
   }
 
-  /**
-   * 下载 CSV 文件
-   */
-  downloadCSV(taskId: string): Observable<Blob> {
-    return this.http.get(`${this.apiUrl}/collect/download/csv/${taskId}`, {
+  downloadCollectionJSON(taskId: string): string {
+    return `${API_BASE_URL}/collect/download/${taskId}?format=json`;
+  }
+
+  getCollectionResult(taskId: string): Observable<Blob> {
+    return this.http.get(`${API_BASE_URL}/collect/download/${taskId}`, {
       responseType: 'blob'
     });
   }
 
+  // ==================== 评论采集 ====================
+
   /**
-   * 下载 JSON 文件
+   * 开始评论采集任务
    */
-  downloadJSON(taskId: string): Observable<Blob> {
-    return this.http.get(`${this.apiUrl}/collect/download/json/${taskId}`, {
+  startReviewCollection(request: ReviewRequest): Observable<TaskResponse> {
+    return this.http.post<TaskResponse>(`${API_BASE_URL}/reviews/start`, request);
+  }
+
+  /**
+   * 获取评论采集任务状态
+   */
+  getReviewCollectionStatus(taskId: string): Observable<TaskStatus> {
+    return this.http.get<TaskStatus>(`${API_BASE_URL}/reviews/status/${taskId}`);
+  }
+
+  /**
+   * 取消评论采集任务
+   */
+  cancelReviewCollection(taskId: string): Observable<any> {
+    return this.http.delete(`${API_BASE_URL}/tasks/${taskId}`);
+  }
+
+  /**
+   * 下载评论数据
+   */
+  downloadReviews(taskId: string): string {
+    return `${API_BASE_URL}/reviews/download/${taskId}`;
+  }
+
+  getReviewsResult(taskId: string): Observable<Blob> {
+    return this.http.get(`${API_BASE_URL}/reviews/download/${taskId}`, {
       responseType: 'blob'
     });
   }
 
+  // ==================== 模型训练 ====================
+
   /**
-   * 获取所有采集任务历史
+   * 开始模型训练任务
    */
-  getCollectionHistory(): Observable<CollectionStatus[]> {
-    return this.http.get<CollectionStatus[]>(`${this.apiUrl}/collect/history`);
+  startTraining(request: TrainingRequest): Observable<TaskResponse> {
+    return this.http.post<TaskResponse>(`${API_BASE_URL}/train/start`, request);
   }
 
   /**
-   * 删除采集任务
+   * 获取训练任务状态
    */
-  deleteCollection(taskId: string): Observable<CollectionResponse> {
-    return this.http.delete<CollectionResponse>(`${this.apiUrl}/collect/${taskId}`);
+  getTrainingStatus(taskId: string): Observable<TaskStatus> {
+    return this.http.get<TaskStatus>(`${API_BASE_URL}/train/status/${taskId}`);
   }
 
   /**
-   * 获取游戏详细信息
+   * 取消训练任务
    */
-  getGameDetails(appId: number): Observable<GameData> {
-    return this.http.get<GameData>(`${this.apiUrl}/game/${appId}`);
+  cancelTraining(taskId: string): Observable<any> {
+    return this.http.delete(`${API_BASE_URL}/tasks/${taskId}`);
   }
 
   /**
-   * 搜索游戏
+   * 获取训练统计信息
    */
-  searchGames(keyword: string, limit: number = 20): Observable<GameData[]> {
-    const params = new HttpParams()
-      .set('keyword', keyword)
-      .set('limit', limit.toString());
-    
-    return this.http.get<GameData[]>(`${this.apiUrl}/game/search`, { params });
+  getTrainingStats(taskId: string): Observable<any> {
+    return this.http.get(`${API_BASE_URL}/train/stats/${taskId}`);
   }
 
   /**
-   * 获取热门游戏列表
+   * 下载训练好的模型
    */
-  getPopularGames(limit: number = 50): Observable<GameData[]> {
-    const params = new HttpParams().set('limit', limit.toString());
-    return this.http.get<GameData[]>(`${this.apiUrl}/game/popular`, { params });
+  downloadModel(taskId: string, modelName: string): string {
+    return `${API_BASE_URL}/train/download/${taskId}/${modelName}`;
+  }
+
+  // ==================== 数据清洗 ====================
+
+  /**
+   * 开始数据清洗任务
+   */
+  startCleaning(request: CleaningRequest): Observable<TaskResponse> {
+    return this.http.post<TaskResponse>(`${API_BASE_URL}/clean/start`, request);
   }
 
   /**
-   * 验证 AppID 是否有效
+   * 获取清洗任务状态
    */
-  validateAppIds(appIds: number[]): Observable<{
-    valid: number[];
-    invalid: number[];
-  }> {
-    return this.http.post<{valid: number[], invalid: number[]}>(`${this.apiUrl}/game/validate`, { appIds });
+  getCleaningStatus(taskId: string): Observable<TaskStatus> {
+    return this.http.get<TaskStatus>(`${API_BASE_URL}/clean/status/${taskId}`);
+  }
+
+  /**
+   * 取消清洗任务
+   */
+  cancelCleaning(taskId: string): Observable<any> {
+    return this.http.delete(`${API_BASE_URL}/tasks/${taskId}`);
+  }
+
+  /**
+   * 分析缺失值
+   */
+  analyzeMissingValues(inputFile: string): Observable<any> {
+    const params = new HttpParams().set('inputFile', inputFile);
+    return this.http.get(`${API_BASE_URL}/clean/analyze/temp`, { params });
+  }
+
+  /**
+   * 下载清洗后的数据
+   */
+  downloadCleanedData(taskId: string): string {
+    return `${API_BASE_URL}/clean/download/${taskId}`;
+  }
+
+  // ==================== 通用 ====================
+
+  /**
+   * 健康检查
+   */
+  healthCheck(): Observable<any> {
+    return this.http.get(`${API_BASE_URL}/health`);
+  }
+
+  /**
+   * 获取任务状态
+   */
+  getTaskStatus(taskId: string): Observable<TaskStatus> {
+    return this.http.get<TaskStatus>(`${API_BASE_URL}/tasks/${taskId}`);
+  }
+
+  /**
+   * 取消任务
+   */
+  cancelTask(taskId: string): Observable<any> {
+    return this.http.delete(`${API_BASE_URL}/tasks/${taskId}`);
   }
 }

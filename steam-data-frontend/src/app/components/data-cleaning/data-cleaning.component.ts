@@ -1,6 +1,9 @@
-import { Component } from '@angular/core';
+import { Component, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { SteamApiService, CleaningRequest, TaskStatus } from '../../services/steam-api.service';
+import { interval, Subscription } from 'rxjs';
+import { switchMap, takeWhile } from 'rxjs/operators';
 
 interface CleaningConfig {
   inputFile: string;
@@ -40,7 +43,9 @@ interface LogEntry {
   templateUrl: './data-cleaning.component.html',
   styleUrl: './data-cleaning.component.scss'
 })
-export class DataCleaningComponent {
+export class DataCleaningComponent implements OnDestroy {
+  currentTaskId: string | null = null;
+  statusCheckSubscription: Subscription | null = null;
   config: CleaningConfig = {
     inputFile: 'Source data.csv',
     outputFile: 'Source data_cleaned.csv',
@@ -72,6 +77,12 @@ export class DataCleaningComponent {
   cleaningComplete: boolean = false;
   startTime: Date | null = null;
 
+  constructor(private apiService: SteamApiService) {}
+
+  ngOnDestroy(): void {
+    this.stopStatusCheck();
+  }
+
   startCleaning(): void {
     this.isCleaning = true;
     this.cleaningComplete = false;
@@ -80,17 +91,26 @@ export class DataCleaningComponent {
     this.logs = [];
 
     this.addLog(`开始数据清洗: ${this.config.inputFile}`, 'info');
-    this.addLog(`输出文件: ${this.config.outputFile}`, 'info');
     
-    if (this.config.useApiCompletion) {
-      this.addLog('✅ 启用 API 数据补全', 'info');
-    }
-    if (this.config.useMlPrediction) {
-      this.addLog('✅ 启用 ML 模型预测', 'info');
-    }
+    const request: CleaningRequest = {
+      inputFile: this.config.inputFile,
+      useApi: this.config.useApiCompletion,
+      useMl: this.config.useMlPrediction,
+      useEstimation: true,
+      deleteFailed: this.config.removeInvalid
+    };
 
-    // 模拟清洗过程
-    this.simulateCleaning();
+    this.apiService.startCleaning(request).subscribe({
+      next: (response) => {
+        this.currentTaskId = response.task_id;
+        this.addLog(`任务已创建: ${response.task_id}`, 'success');
+        this.startStatusCheck();
+      },
+      error: (error) => {
+        this.addLog(`启动失败: ${error.error?.error || error.message}`, 'error');
+        this.isCleaning = false;
+      }
+    });
   }
 
   stopCleaning(): void {
@@ -229,12 +249,193 @@ export class DataCleaningComponent {
   }
 
   downloadCleaned(): void {
-    this.addLog('正在生成清洗数据文件...', 'info');
-    alert('数据下载功能将在后端 API 完成后实现');
+    if (this.currentTaskId) {
+      const url = this.apiService.downloadCleanedData(this.currentTaskId);
+      window.open(url, '_blank');
+      this.addLog('开始下载清洗数据...', 'info');
+    } else {
+      alert('没有可下载的数据');
+    }
   }
 
   viewReport(): void {
-    this.addLog('正在打开清洗报告...', 'info');
-    alert('报告查看功能将在后续开发');
+    if (this.currentTaskId) {
+      this.addLog('正在生成清洗报告...', 'info');
+      
+      // 生成清洗报告 HTML
+      const reportWindow = window.open('', '_blank');
+      if (reportWindow) {
+        const totalProcessed = this.stats.apiFixed + this.stats.mlFixed + this.stats.simpleFilled;
+        const successRate = totalProcessed > 0 ? ((totalProcessed / (totalProcessed + 1)) * 100).toFixed(2) : '0';
+        
+        reportWindow.document.write(`
+          <html>
+            <head>
+              <title>数据清洗报告</title>
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; }
+                .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); padding: 40px; }
+                h1 { color: #2d3748; margin-bottom: 10px; font-size: 32px; }
+                .subtitle { color: #718096; margin-bottom: 30px; }
+                .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 30px 0; }
+                .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px; border-radius: 10px; color: white; text-align: center; }
+                .stat-value { font-size: 48px; font-weight: bold; margin: 10px 0; }
+                .stat-label { font-size: 14px; opacity: 0.9; text-transform: uppercase; letter-spacing: 1px; }
+                .section { margin: 30px 0; padding: 25px; background: #f7fafc; border-radius: 8px; border-left: 4px solid #667eea; }
+                .section-title { font-size: 20px; color: #2d3748; margin-bottom: 15px; font-weight: 600; }
+                .info-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
+                .info-label { color: #4a5568; font-weight: 500; }
+                .info-value { color: #2d3748; font-weight: 600; }
+                .timestamp { color: #a0aec0; font-size: 14px; margin-top: 30px; text-align: center; }
+                @media print { body { background: white; } .container { box-shadow: none; } }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1>🧹 数据清洗报告</h1>
+                <p class="subtitle">任务ID: ${this.currentTaskId}</p>
+                
+                <div class="stats-grid">
+                  <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                    <div class="stat-label">API 修复</div>
+                    <div class="stat-value">${this.stats.apiFixed}</div>
+                  </div>
+                  <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                    <div class="stat-label">ML 预测</div>
+                    <div class="stat-value">${this.stats.mlFixed}</div>
+                  </div>
+                  <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                    <div class="stat-label">规则填充</div>
+                    <div class="stat-value">${this.stats.simpleFilled}</div>
+                  </div>
+                  <div class="stat-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+                    <div class="stat-label">总计修复</div>
+                    <div class="stat-value">${totalProcessed}</div>
+                  </div>
+                </div>
+                
+                <div class="section">
+                  <div class="section-title">📋 清洗详情</div>
+                  <div class="info-row">
+                    <span class="info-label">输入文件</span>
+                    <span class="info-value">${this.config.inputFile}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">输出文件</span>
+                    <span class="info-value">${this.config.outputFile}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">总耗时</span>
+                    <span class="info-value">${this.stats.totalTime}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">成功率</span>
+                    <span class="info-value">${successRate}%</span>
+                  </div>
+                </div>
+                
+                <div class="section">
+                  <div class="section-title">⚙️ 清洗配置</div>
+                  <div class="info-row">
+                    <span class="info-label">API 补全</span>
+                    <span class="info-value">${this.config.useApiCompletion ? '✅ 启用' : '❌ 禁用'}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">ML 预测</span>
+                    <span class="info-value">${this.config.useMlPrediction ? '✅ 启用' : '❌ 禁用'}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">移除无效数据</span>
+                    <span class="info-value">${this.config.removeInvalid ? '✅ 启用' : '❌ 禁用'}</span>
+                  </div>
+                </div>
+                
+                <p class="timestamp">报告生成时间: ${new Date().toLocaleString('zh-CN')}</p>
+              </div>
+            </body>
+          </html>
+        `);
+      }
+    } else {
+      alert('没有可查看的报告');
+    }
+  }
+
+  private startStatusCheck(): void {
+    if (!this.currentTaskId) return;
+
+    this.statusCheckSubscription = interval(2000)
+      .pipe(
+        switchMap(() => this.apiService.getCleaningStatus(this.currentTaskId!)),
+        takeWhile((status) => status.status === 'running' || status.status === 'pending', true)
+      )
+      .subscribe({
+        next: (status) => {
+          this.updateProgressFromStatus(status);
+        },
+        error: (error) => {
+          this.addLog(`状态查询失败: ${error.message}`, 'error');
+          this.stopStatusCheck();
+        }
+      });
+  }
+
+  private stopStatusCheck(): void {
+    if (this.statusCheckSubscription) {
+      this.statusCheckSubscription.unsubscribe();
+      this.statusCheckSubscription = null;
+    }
+  }
+
+  private updateProgressFromStatus(status: TaskStatus): void {
+    this.progress.percentage = status.progress;
+    this.progress.status = status.message;
+
+    if (status.logs) {
+      status.logs.forEach(log => {
+        const logType = log.level === 'success' ? 'success' : 
+                        log.level === 'error' ? 'error' :
+                        log.level === 'warning' ? 'warning' : 'info';
+        
+        const exists = this.logs.some(l => l.message === log.message);
+        if (!exists) {
+          this.addLog(log.message, logType);
+        }
+      });
+    }
+
+    if (status.status === 'completed') {
+      this.handleCleaningComplete(status);
+    } else if (status.status === 'failed') {
+      this.handleCleaningFailed(status);
+    }
+  }
+
+  private handleCleaningComplete(status: TaskStatus): void {
+    this.isCleaning = false;
+    this.cleaningComplete = true;
+
+    if (this.startTime) {
+      const elapsed = new Date().getTime() - this.startTime.getTime();
+      const seconds = Math.floor(elapsed / 1000);
+      this.stats.totalTime = seconds > 60 
+        ? `${Math.floor(seconds / 60)} 分钟 ${seconds % 60} 秒`
+        : `${seconds} 秒`;
+    }
+
+    if (status.result) {
+      this.stats.apiFixed = status.result.api_filled || 0;
+      this.stats.mlFixed = status.result.ml_estimated || 0;
+      this.stats.simpleFilled = status.result.rule_estimated || 0;
+    }
+
+    this.addLog('🎉 数据清洗完成!', 'success');
+    this.stopStatusCheck();
+  }
+
+  private handleCleaningFailed(status: TaskStatus): void {
+    this.isCleaning = false;
+    this.addLog(`❌ 清洗失败: ${status.error || '未知错误'}`, 'error');
+    this.stopStatusCheck();
   }
 }

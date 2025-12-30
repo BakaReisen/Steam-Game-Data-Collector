@@ -1,6 +1,9 @@
-import { Component } from '@angular/core';
+import { Component, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { SteamApiService, ReviewRequest, TaskStatus } from '../../services/steam-api.service';
+import { interval, Subscription } from 'rxjs';
+import { switchMap, takeWhile } from 'rxjs/operators';
 
 interface ReviewConfig {
   appId: number | null;
@@ -31,7 +34,9 @@ interface LogEntry {
   templateUrl: './review-collection.component.html',
   styleUrl: './review-collection.component.scss'
 })
-export class ReviewCollectionComponent {
+export class ReviewCollectionComponent implements OnDestroy {
+  currentTaskId: string | null = null;
+  statusCheckSubscription: Subscription | null = null;
   config: ReviewConfig = {
     appId: null,
     gameName: '',
@@ -53,6 +58,12 @@ export class ReviewCollectionComponent {
   isCollecting: boolean = false;
   collectionComplete: boolean = false;
 
+  constructor(private apiService: SteamApiService) {}
+
+  ngOnDestroy(): void {
+    this.stopStatusCheck();
+  }
+
   isConfigValid(): boolean {
     return !!(this.config.appId && this.config.gameName.trim());
   }
@@ -70,15 +81,41 @@ export class ReviewCollectionComponent {
 
     this.addLog(`开始收集 ${this.config.gameName} 的评论数据`, 'info');
     this.addLog(`AppID: ${this.config.appId}`, 'info');
-    this.addLog(`目标: 好评 ${this.config.positiveCount} 条, 差评 ${this.config.negativeCount} 条`, 'info');
 
-    // 模拟评论采集
-    this.simulateCollection();
+    const request: ReviewRequest = {
+      appId: this.config.appId!,
+      gameName: this.config.gameName,
+      maxReviews: this.config.positiveCount + this.config.negativeCount,
+      language: this.config.language,
+      reviewType: 'all'
+    };
+
+    this.apiService.startReviewCollection(request).subscribe({
+      next: (response) => {
+        this.currentTaskId = response.task_id;
+        this.addLog(`任务已创建: ${response.task_id}`, 'success');
+        this.startStatusCheck();
+      },
+      error: (error) => {
+        this.addLog(`启动失败: ${error.error?.error || error.message}`, 'error');
+        this.isCollecting = false;
+      }
+    });
   }
 
   stopCollection(): void {
+    if (this.currentTaskId) {
+      this.apiService.cancelReviewCollection(this.currentTaskId).subscribe({
+        next: () => {
+          this.addLog('采集已停止', 'warning');
+        },
+        error: (error) => {
+          this.addLog(`停止失败: ${error.message}`, 'error');
+        }
+      });
+    }
     this.isCollecting = false;
-    this.addLog('采集已停止', 'warning');
+    this.stopStatusCheck();
   }
 
   resetForm(): void {
@@ -178,12 +215,151 @@ export class ReviewCollectionComponent {
   }
 
   downloadCSV(): void {
-    this.addLog('正在生成 CSV 文件...', 'info');
-    alert('CSV 下载功能将在后端 API 完成后实现');
+    if (this.currentTaskId) {
+      const url = this.apiService.downloadReviews(this.currentTaskId);
+      window.open(url, '_blank');
+      this.addLog('开始下载 CSV 文件...', 'info');
+    } else {
+      alert('没有可下载的数据');
+    }
   }
 
   viewSample(): void {
-    this.addLog('显示评论样本...', 'info');
-    alert('评论样本查看功能将在后续开发');
+    if (this.currentTaskId) {
+      this.addLog('正在加载评论样本...', 'info');
+      
+      this.apiService.getReviewsResult(this.currentTaskId).subscribe({
+        next: (blob) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const csvText = reader.result as string;
+            const lines = csvText.split('\n');
+            const headers = lines[0].split(',');
+            const sampleLines = lines.slice(1, 11); // 10条样本
+            
+            const sampleWindow = window.open('', '_blank');
+            if (sampleWindow) {
+              const reviewsHtml = sampleLines.map((line, index) => {
+                const values = line.split(',');
+                if (values.length < 3) return '';
+                
+                return `
+                  <div class="review-card">
+                    <div class="review-header">
+                      <span class="review-number">#${index + 1}</span>
+                      <span class="review-sentiment" style="background: ${values[2] === 'positive' ? '#10b981' : '#ef4444'}">
+                        ${values[2] === 'positive' ? '👍 好评' : '👎 差评'}
+                      </span>
+                    </div>
+                    <div class="review-content">${values[1] ? values[1].substring(0, 200) + (values[1].length > 200 ? '...' : '') : 'N/A'}</div>
+                  </div>
+                `;
+              }).join('');
+              
+              sampleWindow.document.write(`
+                <html>
+                  <head>
+                    <title>评论样本预览</title>
+                    <style>
+                      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; }
+                      .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); padding: 40px; }
+                      h1 { color: #2d3748; margin-bottom: 10px; font-size: 32px; }
+                      .subtitle { color: #718096; margin-bottom: 30px; }
+                      .review-card { background: #f7fafc; border-radius: 8px; padding: 20px; margin: 15px 0; border-left: 4px solid #667eea; }
+                      .review-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+                      .review-number { color: #a0aec0; font-weight: bold; font-size: 14px; }
+                      .review-sentiment { padding: 4px 12px; border-radius: 12px; color: white; font-size: 12px; font-weight: 600; }
+                      .review-content { color: #4a5568; line-height: 1.6; }
+                      .timestamp { color: #a0aec0; font-size: 14px; margin-top: 30px; text-align: center; }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="container">
+                      <h1>💬 评论样本预览</h1>
+                      <p class="subtitle">任务ID: ${this.currentTaskId} | 显示前 10 条评论</p>
+                      ${reviewsHtml}
+                      <p class="timestamp">生成时间: ${new Date().toLocaleString('zh-CN')}</p>
+                    </div>
+                  </body>
+                </html>
+              `);
+            }
+          };
+          reader.readAsText(blob);
+        },
+        error: (error) => {
+          this.addLog('样本加载失败: ' + error.message, 'error');
+        }
+      });
+    } else {
+      alert('没有可查看的评论样本');
+    }
+  }
+
+  private startStatusCheck(): void {
+    if (!this.currentTaskId) return;
+
+    this.statusCheckSubscription = interval(2000)
+      .pipe(
+        switchMap(() => this.apiService.getReviewCollectionStatus(this.currentTaskId!)),
+        takeWhile((status) => status.status === 'running' || status.status === 'pending', true)
+      )
+      .subscribe({
+        next: (status) => {
+          this.updateProgressFromStatus(status);
+        },
+        error: (error) => {
+          this.addLog(`状态查询失败: ${error.message}`, 'error');
+          this.stopStatusCheck();
+        }
+      });
+  }
+
+  private stopStatusCheck(): void {
+    if (this.statusCheckSubscription) {
+      this.statusCheckSubscription.unsubscribe();
+      this.statusCheckSubscription = null;
+    }
+  }
+
+  private updateProgressFromStatus(status: TaskStatus): void {
+    this.progress.percentage = status.progress;
+    this.progress.currentStatus = status.message;
+
+    if (status.logs && status.logs.length > 0) {
+      const lastLog = status.logs[status.logs.length - 1];
+      const logType = lastLog.level === 'success' ? 'success' : 
+                      lastLog.level === 'error' ? 'error' :
+                      lastLog.level === 'warning' ? 'warning' : 'info';
+      
+      const lastLocalLog = this.logs[this.logs.length - 1];
+      if (!lastLocalLog || lastLocalLog.message !== lastLog.message) {
+        this.addLog(lastLog.message, logType);
+      }
+    }
+
+    if (status.status === 'completed') {
+      this.handleCollectionComplete(status);
+    } else if (status.status === 'failed') {
+      this.handleCollectionFailed(status);
+    }
+  }
+
+  private handleCollectionComplete(status: TaskStatus): void {
+    this.isCollecting = false;
+    this.collectionComplete = true;
+
+    if (status.result) {
+      this.progress.collected = status.result.total_collected || 0;
+    }
+
+    this.addLog('🎉 评论采集完成!', 'success');
+    this.stopStatusCheck();
+  }
+
+  private handleCollectionFailed(status: TaskStatus): void {
+    this.isCollecting = false;
+    this.addLog(`❌ 采集失败: ${status.error || '未知错误'}`, 'error');
+    this.stopStatusCheck();
   }
 }

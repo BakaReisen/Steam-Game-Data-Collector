@@ -1,6 +1,9 @@
-import { Component } from '@angular/core';
+import { Component, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { SteamApiService, CollectionRequest, TaskStatus } from '../../services/steam-api.service';
+import { interval, Subscription } from 'rxjs';
+import { switchMap, takeWhile } from 'rxjs/operators';
 
 interface CollectionConfig {
   gameCount: number;
@@ -36,10 +39,12 @@ interface LogEntry {
   templateUrl: './data-collection.component.html',
   styleUrl: './data-collection.component.scss'
 })
-export class DataCollectionComponent {
+export class DataCollectionComponent implements OnDestroy {
   selectedMode: number = 0;
   isCollecting: boolean = false;
   collectionComplete: boolean = false;
+  currentTaskId: string | null = null;
+  statusCheckSubscription: Subscription | null = null;
 
   config: CollectionConfig = {
     gameCount: 100,
@@ -67,6 +72,12 @@ export class DataCollectionComponent {
   collectedData: any[] = [];
   startTime: Date | null = null;
 
+  constructor(private apiService: SteamApiService) {}
+
+  ngOnDestroy(): void {
+    this.stopStatusCheck();
+  }
+
   selectMode(mode: number): void {
     this.selectedMode = mode;
     this.resetProgress();
@@ -88,13 +99,36 @@ export class DataCollectionComponent {
     this.addLog('开始数据采集...', 'info');
     this.addLog(`采集模式: ${this.getModeName()}`, 'info');
 
-    // 模拟采集过程
-    this.simulateCollection();
+    // 构建请求参数
+    const request = this.buildCollectionRequest();
+    
+    // 调用后端 API
+    this.apiService.startCollection(request).subscribe({
+      next: (response) => {
+        this.currentTaskId = response.task_id;
+        this.addLog(`任务已创建: ${response.task_id}`, 'success');
+        this.startStatusCheck();
+      },
+      error: (error) => {
+        this.addLog(`启动失败: ${error.error?.error || error.message}`, 'error');
+        this.isCollecting = false;
+      }
+    });
   }
 
   stopCollection(): void {
+    if (this.currentTaskId) {
+      this.apiService.cancelCollection(this.currentTaskId).subscribe({
+        next: () => {
+          this.addLog('采集已停止', 'warning');
+        },
+        error: (error) => {
+          this.addLog(`停止失败: ${error.message}`, 'error');
+        }
+      });
+    }
     this.isCollecting = false;
-    this.addLog('采集已停止', 'warning');
+    this.stopStatusCheck();
   }
 
   resetForm(): void {
@@ -270,20 +304,190 @@ export class DataCollectionComponent {
   }
 
   downloadCSV(): void {
-    this.addLog('正在生成 CSV 文件...', 'info');
-    // TODO: 实现 CSV 下载逻辑
-    alert('CSV 下载功能将在后端 API 完成后实现');
+    if (this.currentTaskId) {
+      const url = this.apiService.downloadCollectionResult(this.currentTaskId);
+      window.open(url, '_blank');
+      this.addLog('开始下载 CSV 文件...', 'info');
+    } else {
+      alert('没有可下载的数据');
+    }
   }
 
   downloadJSON(): void {
-    this.addLog('正在生成 JSON 文件...', 'info');
-    // TODO: 实现 JSON 下载逻辑
-    alert('JSON 下载功能将在后端 API 完成后实现');
+    if (this.currentTaskId) {
+      this.addLog('开始下载 JSON 文件...', 'info');
+      const url = this.apiService.downloadCollectionJSON(this.currentTaskId);
+      window.open(url, '_blank');
+    } else {
+      alert('没有可下载的数据');
+    }
   }
 
   viewData(): void {
-    this.addLog('正在跳转到数据查看页面...', 'info');
-    // TODO: 实现数据查看功能
-    alert('数据查看功能将在后续开发');
+    if (this.currentTaskId) {
+      this.addLog('正在加载数据预览...', 'info');
+      // 获取 CSV 数据并在新窗口显示
+      const csvUrl = this.apiService.downloadCollectionResult(this.currentTaskId);
+      this.apiService.getCollectionResult(this.currentTaskId).subscribe({
+        next: (blob) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const csvText = reader.result as string;
+            const lines = csvText.split('\n').slice(0, 101); // 前100行 + header
+            const preview = lines.join('\n');
+            
+            // 创建预览窗口
+            const previewWindow = window.open('', '_blank');
+            if (previewWindow) {
+              previewWindow.document.write(`
+                <html>
+                  <head>
+                    <title>数据预览 - ${this.currentTaskId}</title>
+                    <style>
+                      body { font-family: 'Courier New', monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+                      pre { white-space: pre-wrap; word-wrap: break-word; background: #252526; padding: 15px; border-radius: 5px; }
+                      .header { background: #2d2d30; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                      h2 { margin: 0 0 10px 0; color: #4ec9b0; }
+                      .info { color: #ce9178; }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="header">
+                      <h2>📊 数据预览</h2>
+                      <p class="info">任务ID: ${this.currentTaskId}</p>
+                      <p class="info">显示前 100 行数据</p>
+                    </div>
+                    <pre>${preview}</pre>
+                  </body>
+                </html>
+              `);
+            }
+          };
+          reader.readAsText(blob);
+        },
+        error: (error) => {
+          this.addLog('数据预览失败: ' + error.message, 'error');
+        }
+      });
+    } else {
+      alert('没有可查看的数据');
+    }
+  }
+
+  private buildCollectionRequest(): CollectionRequest {
+    const modeMap: { [key: number]: string } = {
+      1: 'sample',
+      2: 'top_games',
+      3: 'custom',
+      4: 'chinese_reviews',
+      5: 'steamspy'
+    };
+
+    const request: CollectionRequest = {
+      mode: modeMap[this.selectedMode] || 'sample',
+      delay: this.config.delay,
+      skipSteamcharts: this.config.skipSteamCharts
+    };
+
+    switch (this.selectedMode) {
+      case 2: // 自定义数量
+        request.limit = this.config.gameCount;
+        break;
+      case 3: // 指定 AppID
+        const appIds = this.config.appIdsText
+          .split(/[,\n]/)
+          .map(id => parseInt(id.trim()))
+          .filter(id => !isNaN(id));
+        request.appIds = appIds;
+        break;
+      case 4: // 热门游戏
+        request.threshold = this.config.minReviews;
+        request.maxGames = this.config.maxGames || 50;
+        break;
+      case 5: // 大规模采集
+        request.limit = this.config.topLimit;
+        break;
+    }
+
+    return request;
+  }
+
+  private startStatusCheck(): void {
+    if (!this.currentTaskId) return;
+
+    this.statusCheckSubscription = interval(2000)
+      .pipe(
+        switchMap(() => this.apiService.getCollectionStatus(this.currentTaskId!)),
+        takeWhile((status) => {
+          return status.status === 'running' || status.status === 'pending';
+        }, true)
+      )
+      .subscribe({
+        next: (status) => {
+          this.updateProgressFromStatus(status);
+        },
+        error: (error) => {
+          this.addLog(`状态查询失败: ${error.message}`, 'error');
+          this.stopStatusCheck();
+        }
+      });
+  }
+
+  private stopStatusCheck(): void {
+    if (this.statusCheckSubscription) {
+      this.statusCheckSubscription.unsubscribe();
+      this.statusCheckSubscription = null;
+    }
+  }
+
+  private updateProgressFromStatus(status: TaskStatus): void {
+    this.progress.percentage = status.progress;
+    this.progress.currentGame = status.message;
+
+    // 更新日志
+    if (status.logs && status.logs.length > 0) {
+      const lastLog = status.logs[status.logs.length - 1];
+      const logType = lastLog.level === 'success' ? 'success' : 
+                      lastLog.level === 'error' ? 'error' :
+                      lastLog.level === 'warning' ? 'warning' : 'info';
+      
+      // 避免重复添加相同的日志
+      const lastLocalLog = this.logs[this.logs.length - 1];
+      if (!lastLocalLog || lastLocalLog.message !== lastLog.message) {
+        this.addLog(lastLog.message, logType);
+      }
+    }
+
+    // 检查是否完成
+    if (status.status === 'completed') {
+      this.handleCollectionComplete(status);
+    } else if (status.status === 'failed') {
+      this.handleCollectionFailed(status);
+    }
+  }
+
+  private handleCollectionComplete(status: TaskStatus): void {
+    this.isCollecting = false;
+    this.collectionComplete = true;
+
+    if (this.startTime) {
+      const totalTime = new Date().getTime() - this.startTime.getTime();
+      this.progress.totalTime = this.formatTime(totalTime);
+    }
+
+    if (status.result) {
+      this.progress.success = status.result.total_collected || 0;
+      this.progress.total = status.result.total_requested || 0;
+      this.progress.failed = this.progress.total - this.progress.success;
+    }
+
+    this.addLog('🎉 数据采集完成!', 'success');
+    this.stopStatusCheck();
+  }
+
+  private handleCollectionFailed(status: TaskStatus): void {
+    this.isCollecting = false;
+    this.addLog(`❌ 采集失败: ${status.error || '未知错误'}`, 'error');
+    this.stopStatusCheck();
   }
 }
